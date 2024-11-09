@@ -8,13 +8,13 @@ sider the following MDP:
 
 • The transition function is defined as follows:
 
- x ̇ t+1 = x ̇ t + (fx,t − ρx,t )∆t
- 
- y ̇t+1 = y ̇t + (fy,t − ρy,t)∆t
- 
- xt+1 = xt+x ̇t∆t
- 
- yt+1 = xt+y ̇t∆t
+       x ̇ t+1 = x ̇ t + (fx,t − ρx,t )∆t
+       
+       y ̇t+1 = y ̇t + (fy,t − ρy,t)∆t
+       
+       xt+1 = xt+x ̇t∆t
+       
+       yt+1 = xt+y ̇t∆t
     
 
 where ρx,t and ρy,t are small independent noises, sampled from N (0, 0.1) at each time-step t, and ∆t is set to 0.1 seconds. We are assuming here that the robot has a mass of 1 Kg. You can imagine the force noises as air resistance or random friction (although air resistance should scale up as a function of velocity).
