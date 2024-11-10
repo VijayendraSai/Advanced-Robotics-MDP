@@ -22,19 +22,7 @@ The main challenge is efficiently generating a collision-free path from a start 
 \begin{itemize}
     \item Configuring MuJoCo and exploring various models, including Newton’s cradle with no gravity.
     \item Developing basic pathfinding in a 3D environment using Dijkstra’s algorithm for initial path selection and fixed velocity controls.
-    \begin{figure}[h!]
-        \centering
-        \includegraphics[width=0.5\textwidth]{./images/trapezoidal.png}
-        \caption{Trapezoidal decomposition (\(\mathcal{C} = \mathbb{R}^3_{\text{max}}\))\cite{mobile_robotics}}
-        \label{fig:trapezoidal}
-    \end{figure}
     \item Enhancing pathfinding with kinodynamic RRT, incorporating a safety margin around obstacles.
-    \begin{figure}[h!]
-        \centering
-        \includegraphics[width=0.5\textwidth]{./images/kinodyanmics.png}
-        \caption{Kinodynamic RRT}
-        \label{fig:kinodynamic}
-    \end{figure}
     \item Replacing basic controls with a PID controller to follow the planned path.
     \item Simulating and visualizing the robot’s movement within the MuJoCo physics engine.
 \end{itemize}
@@ -49,13 +37,6 @@ The environment consists of a 2D plane with predefined walls and boundaries. The
     \item \textbf{Goal Area:} The target area for the robot is set between coordinates (0.9, -0.3) and (1.1, 0.3).
     \item \textbf{Boundaries:} The outer walls of the environment prevent the robot from moving outside the area.
 \end{itemize}
-
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.5\textwidth]{./images/render.png}
-    \caption{Environment Setup}
-    \label{fig:environment}
-\end{figure}
 
 This setup ensures the presence of both static and dynamic constraints, making path planning non-trivial and control challenging.
 
@@ -75,13 +56,6 @@ The algorithm grows a tree from the start position by:
 
 This process repeats until the robot reaches the goal area or a maximum number of iterations is reached. The function \texttt{kinodynamic\_rrt} implements this process, while \texttt{simulate} handles the forward simulation of the robot’s dynamics.
     
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.5\textwidth]{./images/path.png}
-    \caption{Kinodynamic RRT}
-    \label{fig:sample_image}
-\end{figure}
-
 \subsection{Purpose of \texttt{simulate()} in \texttt{kinodynamic\_rrt}}
 In traditional RRT, paths are generated based solely on geometric feasibility. However, for real systems with dynamic constraints, \texttt{simulate()} serves several critical functions:
 \begin{itemize}
@@ -213,84 +187,5 @@ Wikipedia contributors, "Ziegler–Nichols method," \textit{Wikipedia},
 \url{https://en.wikipedia.org/wiki/Ziegler%E2%80%93Nichols_method}, accessed 26-October-2024.
 
 \end{thebibliography}
-
-\begin{figure}[h!]
-    \centering
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/5.png}
-        \caption{Tmax = 5}
-        \label{fig:5.png}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/10.png}
-        \caption{Tmax = 10}
-        \label{fig:10.png}
-    \end{subfigure}
-    
-    \vspace{0.5cm} % Adds some vertical space between rows
-
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/20.png}
-        \caption{Tmax = 20}
-        \label{fig:20.png}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/30.png}
-        \caption{Tmax = 30}
-        \label{fig:30.png}
-    \end{subfigure}
-
-    \caption{Visualization of path exploration}
-    \label{fig:Time Trails}
-\end{figure}
-
-\begin{figure}[h!]
-    \centering
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/tree1.png}
-        \caption{Trial 1}
-        \label{fig:tree_1}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/tree2.png}
-        \caption{Trial 2}
-        \label{fig:tree_2}
-    \end{subfigure}
-    
-    \vspace{0.5cm} % Adds some vertical space between rows
-
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/tree3.png}
-        \caption{Trial 3}
-        \label{fig:tree_3}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/tree4.png}
-        \caption{Trial 4}
-        \label{fig:tree_4}
-    \end{subfigure}
-
-    \begin{subfigure}{0.45\textwidth}
-        \centering
-        \includegraphics[width=\textwidth]{./images/tree5.png}
-        \caption{Trial 5}
-        \label{fig:tree_5}
-    \end{subfigure}
-
-    \caption{Visualization of trees for different trials.}
-    \label{fig:trials}
-\end{figure}
 
 \end{document}
