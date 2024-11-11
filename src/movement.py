@@ -6,14 +6,99 @@ import matplotlib
 import matplotlib.pyplot as plt
 import math
 import time
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
-class Critic:
-    def update(self, state):
+class CriticNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super(CriticNetwork, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, 1)  # Outputting a single value for V(s)
+
+    def forward(self, state):
+        x = torch.relu(self.fc1(state))
+        value = self.fc2(x)
         return value
 
-class Actor:
-    def update(self, state)
-        return policy
+class ActorNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(ActorNetwork, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)  # Outputting policy parameters
+
+    def forward(self, state):
+        x = torch.relu(self.fc1(state))
+        action_probs = torch.softmax(self.fc2(x), dim=-1)  # Output a probability distribution
+        return action_probs
+
+def reward_function(state, goal_position, epsilon=0.1):
+    distance_to_goal = np.linalg.norm(state[:2] - goal_position[:2])
+    return 1 if distance_to_goal <= epsilon else 0
+
+def actor_critic_training(start_pos, goal_position, gamma=0.99, alpha=0.001, beta=0.001, max_steps=100):
+    # Hyperparameters
+    input_dim = 4  # Assuming state has 4 dimensions (e.g., x, y, velocity x, velocity y)
+    hidden_dim = 128
+    action_dim = 2  # Number of actions (e.g., move left/right, up/down)
+
+    # Initialize neural networks
+    actor = ActorNetwork(input_dim, hidden_dim, action_dim)
+    critic = CriticNetwork(input_dim, hidden_dim)
+
+    # Optimizers for the actor and critic networks
+    actor_optimizer = optim.Adam(actor.parameters(), lr=alpha)
+    critic_optimizer = optim.Adam(critic.parameters(), lr=beta)
+
+    state = torch.tensor(start_pos, dtype=torch.float32).unsqueeze(0)  # Shape (1, input_dim)
+    epsilon = 0.1
+
+    for t in range(max_steps):
+        # Calculate the reward based on the current state and goal position
+        reward = reward_function(state[0].numpy(), goal_position, epsilon)
+        reward_tensor = torch.tensor([reward], dtype=torch.float32)
+
+        # Actor forward pass: Get action probabilities
+        action_probs = actor(state)
+        action_dist = torch.distributions.Categorical(action_probs)
+        action = action_dist.sample()
+        
+        # Critic forward pass: Get value of the current state
+        value = critic(state)
+        
+        # Simulate the environment step (assume action moves position by a small amount)
+        next_state_np = state[0].numpy() + (action.item() * 0.1)  # Example of state transition
+        next_state = torch.tensor(next_state_np, dtype=torch.float32).unsqueeze(0)
+        
+        # Critic forward pass for the next state
+        next_value = critic(next_state).detach()  # Do not backpropagate from this
+        td_error = reward_tensor + gamma * next_value - value
+        
+        # Critic loss and update
+        critic_loss = td_error.pow(2).mean()
+        critic_optimizer.zero_grad()
+        critic_loss.backward()
+        critic_optimizer.step()
+        
+        # Actor loss and update
+        actor_loss = -action_dist.log_prob(action) * td_error.detach()  # Multiply log-prob by TD error
+        actor_optimizer.zero_grad()
+        actor_loss.backward()
+        actor_optimizer.step()
+        
+        # Move to the next state
+        state = next_state
+
+        # Logging for debugging
+        print(f"Step {t}: State={state[0].numpy()}, Reward={reward}, TD Error={td_error.item()}, Actor Loss={actor_loss.item()}, Critic Loss={critic_loss.item()}")
+
+        # Check if the goal is reached
+        if reward == 1:
+            print(f"Goal reached at step {t}!")
+            break
+
+    return actor, critic
 
 def is_in_goal_area(point, goal_area):
     
@@ -155,39 +240,6 @@ def generate_random_seed():
     seed = random.randint(0, 2**32 - 1)
     return seed
 
-def run_execution_trials(start_pos, goal_area, walls, outside_walls, num_trials, Tmax):
-    
-    success_count = 0
-    plan_time = -1
-    paths = []
-    
-    for trial in range(num_trials):
-        
-        print(f"Running trial {trial + 1}/{num_trials}...")
-        seed = generate_random_seed()
-        
-        # load the MuJoCo model
-        model = mujoco.MjModel.from_xml_path("ball_square.xml")
-        data = mujoco.MjData(model)
-       
-        # record the execution time for the smoothed path
-        plan_time = move_ball(model, data, path, plot_enabled=False, render_enabled=False, logging=False, Tmax=Tmax)
-        print(f"Planning time: {plan_time:.2f} seconds")
-
-        # check the time
-        if plan_time <= Tmax:
-            success_count += 1
-            print("Successfully reached the goal area!")
-        else:
-            print("Failed to reach the goal area within the time limit.")
-
-    # report the success rate
-    success_rate = (success_count / num_trials) * 100
-    print(f"Success rate over {num_trials} trials: {success_rate:.2f}%")
-    plot_path_with_boundaries_and_mixed_obstacles(paths, walls, goal_area, outside_walls)
-    
-    return
-
 def main():
     
     # define the goal area, walls, and the starting position
@@ -217,7 +269,7 @@ def main():
     if choice == 1:
         model_creation(start_pos, goal_area, walls, outside_walls)
     elif choice = 2:
-        simulate()
+        actor_critic_training(start_pos, goal_position, gamma=0.99, alpha=0.001, beta=0.001, max_steps=100)
     else choice == 3:
         num_trials = 30
         # run all the trails in a loop with changing time
