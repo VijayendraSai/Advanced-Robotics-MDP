@@ -59,12 +59,12 @@ def transition(state, action, dt=0.1):
     # Return the new state
     return np.array([new_x, new_y, new_vx, new_vy])
 
-def reward_function(state, goal_position, epsilon=0.1):
+def reward_function(state, goal_position, epsilon=0.10):
     distance_to_goal = np.linalg.norm(state[:2] - goal_position[:2])
     print(distance_to_goal)
     return 1 if distance_to_goal <= epsilon else 0
 
-def actor_critic_training(start_pos, goal_position, actor, critic, walls, gamma=0.99, alpha=1e-6, beta=1e-6, max_steps=1000, num_episodes=100, log=True, plot=True):
+def actor_critic_training(start_pos, goal_position, actor, critic, walls, gamma=0.99, alpha=1e-5, beta=1e-5, max_steps=30, num_episodes=1500, log=True, plot=True):
     
     actor_optimizer = optim.Adam(actor.parameters(), lr=alpha)
     critic_optimizer = optim.Adam(critic.parameters(), lr=beta)
@@ -181,7 +181,7 @@ def move_ball(model, data, actor, window, scene, context, options, viewport, cam
 
         # Check if goal is reached
         distance_to_goal = np.linalg.norm(goal_position[:2] - ball_pos)
-        if distance_to_goal < 0.05:
+        if distance_to_goal < 0.1:
             print("Goal reached.")
             break
 
