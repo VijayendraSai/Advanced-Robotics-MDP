@@ -30,7 +30,7 @@ class ActorHead(nn.Module):
 
     def forward(self, latent):
         mu = torch.tanh(self.fc_mu(latent))  # Mean output bounded by [-1, 1]
-        sigma = F.softplus(self.fc_sigma(latent)) * 15 # Ensure sigma is positive
+        sigma = F.softplus(self.fc_sigma(latent)) * 50 # Ensure sigma is positive
         return mu, sigma
 
 # Critic Head Network
@@ -86,7 +86,7 @@ def reward_function(state, goal_position, epsilon=0.1):
     distance_to_goal = np.linalg.norm(state[:2] - goal_position[:2])
     return 1 if distance_to_goal <= epsilon else 0
 
-def actor_critic_training(start_pos, goal_position, model, walls, outside_walls, gamma=0.99, alpha=1e-3, max_steps=3000, 
+def actor_critic_training(start_pos, goal_position, model, walls, outside_walls, gamma=0.99, alpha=.01, max_steps=3000, 
                           num_episodes=100, log=True, plot=True, render_enabled=False, mujoco_model=None, mujoco_data=None, fixed=False):
     
     optimizer = optim.Adam(model.parameters(), lr=alpha)
@@ -99,7 +99,7 @@ def actor_critic_training(start_pos, goal_position, model, walls, outside_walls,
 
     # Initialize epsilon values
     epsilon_start = 0.25
-    epsilon_end = 0.05
+    epsilon_end = 0.1
 
     for episode in range(num_episodes if not render_enabled else 1):  # Only run one episode if rendering
         
@@ -107,7 +107,8 @@ def actor_critic_training(start_pos, goal_position, model, walls, outside_walls,
         if not fixed:
             progress_ratio = episode / max(num_episodes, 1)
             epsilon = epsilon_start - (epsilon_start - epsilon_end) * progress_ratio
-            start_pos = random_position(walls, outside_walls)  
+            start_pos = random_position(walls, outside_walls)
+            print(epsilon)
         else:
             epsilon = epsilon_end
 
@@ -135,11 +136,7 @@ def actor_critic_training(start_pos, goal_position, model, walls, outside_walls,
 
             # Apply forces in MuJoCo
             mujoco_data.xfrc_applied[mujoco.mj_name2id(mujoco_model, mujoco.mjtObj.mjOBJ_BODY, "ball"), :2] = action[:2]
-
-            # Step the simulation
             mujoco.mj_step(mujoco_model, mujoco_data)
-
-            # Reset external forces
             mujoco_data.xfrc_applied[mujoco.mj_name2id(mujoco_model, mujoco.mjtObj.mjOBJ_BODY, "ball"), :2] = [0, 0]
 
             # Get next state
@@ -195,7 +192,7 @@ def actor_critic_training(start_pos, goal_position, model, walls, outside_walls,
     if render_enabled:
         glfw.terminate()
 
-    if plot and not render_enabled:  # Plot only after full training
+    if plot:
         plt.figure()
         plt.plot(episode_rewards, label="Average Reward per Episode")
         plt.xlabel("Episode")
@@ -207,53 +204,34 @@ def actor_critic_training(start_pos, goal_position, model, walls, outside_walls,
 
     return model
 
-def random_position(walls, outside_walls, margin=0.35):
+def random_position(walls, outside_walls, margin=0.05):
    
-    # Extract the bounds of the outside_walls polygon
-    x_min = min(min(wall[0][0], wall[1][0]) for wall in outside_walls) + margin
-    x_max = max(max(wall[0][0], wall[1][0]) for wall in outside_walls) - margin
-    y_min = min(min(wall[0][1], wall[1][1]) for wall in outside_walls) + margin
-    y_max = max(max(wall[0][1], wall[1][1]) for wall in outside_walls) - margin
+    # Box boundaries
+    x_min = -0.15 + margin  # Right edge of gcase_a
+    x_max = 1.05 - margin   # Left edge of gcase_b
+    y_min = -0.32 + margin  # Top edge of gcase_d
+    y_max = 0.32 - margin   # Bottom edge of gcase_c
 
     while True:
-        # Generate random position within the bounding box
+        # Generate a random position within the box
         x = random.uniform(x_min, x_max)
         y = random.uniform(y_min, y_max)
-        vx, vy = 0.0, 0.0
+        vx, vy = 0.0, 0.0  # Velocity is initialized to zero
 
-        # Check if the point is inside the polygon and not inside walls
-        if is_inside_outside_walls(x, y, outside_walls) and not is_inside_wall(x, y, walls):
+        # Check if the position is inside wall_3
+        if not is_inside_wall(x, y):
             return np.array([x, y, vx, vy])
 
-def is_inside_outside_walls(x, y, walls):
+def is_inside_wall(x, y):
     
-    num_intersections = 0
-    for wall in walls:
-        x1, y1 = wall[0]
-        x2, y2 = wall[1]
+    # Wall 3 dimensions from the XML
+    wall_3_x_min = 0.5 - 0.1  # Center x - half width
+    wall_3_x_max = 0.5 + 0.1  # Center x + half width
+    wall_3_y_min = -0.15  # Center y - half height
+    wall_3_y_max = 0.15   # Center y + half height
 
-        # Check if the point lies on the wall's edge
-        if min(y1, y2) <= y <= max(y1, y2) and x <= max(x1, x2):
-            if y1 != y2:
-                x_intersection = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
-                if x <= x_intersection:
-                    num_intersections += 1
-
-    # Inside if the number of intersections is odd
-    return num_intersections % 2 == 1
-
-def is_inside_wall(x, y, walls):
-    
-    for wall_name, wall_coords in walls.items():
-        x_min = min(coord[0] for coord in wall_coords)
-        x_max = max(coord[0] for coord in wall_coords)
-        y_min = min(coord[1] for coord in wall_coords)
-        y_max = max(coord[1] for coord in wall_coords)
-
-        if x_min <= x <= x_max and y_min <= y <= y_max:
-            return True
-
-    return False
+    # Check if the point is inside the wall bounds
+    return wall_3_x_min <= x <= wall_3_x_max and wall_3_y_min <= y <= wall_3_y_max
 
 def render_scene(model, data, options, scene, context, viewport, camera, window):
     
@@ -379,7 +357,7 @@ def main():
                 model=model,
                 walls=walls,
                 outside_walls=outside_walls,
-                log=True,
+                log=False,
                 plot=True,
                 render_enabled=True,
                 mujoco_model=mujoco_model,
