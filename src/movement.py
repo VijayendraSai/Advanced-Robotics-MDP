@@ -9,49 +9,60 @@ import matplotlib.patches as patches
 import mujoco
 import glfw
 
-# Neural network components
-class BackboneNetwork(nn.Module):
-    def __init__(self, input_dim, hidden_dim1, hidden_dim2):
-        super(BackboneNetwork, self).__init__()
+# Actor Network with Gaussian Outputs
+class ActorNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dim1, hidden_dim2, output_dim):
+        super(ActorNetwork, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim1)
         self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.fc_mu = nn.Linear(hidden_dim2, output_dim)
+        self.fc_sigma = nn.Linear(hidden_dim2, output_dim)
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # Apply Xavier initialization to all layers
+        for layer in [self.fc1, self.fc2, self.fc_mu, self.fc_sigma]:
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.zeros_(layer.bias)
 
     def forward(self, state):
         x = torch.relu(self.fc1(state))
         x = torch.relu(self.fc2(x))
-        return x
-
-class ActorHead(nn.Module):
-    def __init__(self, hidden_dim, output_dim):
-        super(ActorHead, self).__init__()
-        self.fc_mu = nn.Linear(hidden_dim, output_dim)
-        self.log_sigma = nn.Parameter(torch.zeros(output_dim))
-
-    def forward(self, latent):
-        mu = torch.tanh(self.fc_mu(latent))
-        sigma = torch.exp(self.log_sigma) + 1e-5
+        mu = torch.tanh(self.fc_mu(x))  # Mean output bounded by [-1, 1]
+        sigma = F.softplus(self.fc_sigma(x)) + 1e-5  # Ensure sigma is positive
         return mu, sigma
 
-class CriticHead(nn.Module):
-    def __init__(self, hidden_dim):
-        super(CriticHead, self).__init__()
-        self.fc_value = nn.Linear(hidden_dim, 1)
+# Critic Network
+class CriticNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dim1, hidden_dim2):
+        super(CriticNetwork, self).__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim1)
+        self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.fc_value = nn.Linear(hidden_dim2, 1)
+        self.initialize_weights()
 
-    def forward(self, latent):
-        value = self.fc_value(latent)
+    def initialize_weights(self):
+        # Apply Xavier initialization to all layers
+        for layer in [self.fc1, self.fc2, self.fc_value]:
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.zeros_(layer.bias)
+
+    def forward(self, state):
+        x = torch.relu(self.fc1(state))
+        x = torch.relu(self.fc2(x))
+        value = self.fc_value(x)
         return value
 
+# Actor-Critic model with separate networks
 class ActorCriticModel(nn.Module):
     def __init__(self, input_dim, hidden_dim1, hidden_dim2, action_dim):
         super(ActorCriticModel, self).__init__()
-        self.backbone = BackboneNetwork(input_dim, hidden_dim1, hidden_dim2)
-        self.actor_head = ActorHead(hidden_dim2, action_dim)
-        self.critic_head = CriticHead(hidden_dim2)
+        self.actor = ActorNetwork(input_dim, hidden_dim1, hidden_dim2, action_dim)
+        self.critic = CriticNetwork(input_dim, hidden_dim1, hidden_dim2)
 
     def forward(self, state):
-        latent = self.backbone(state)
-        mu, sigma = self.actor_head(latent)
-        value = self.critic_head(latent)
+        mu, sigma = self.actor(state)
+        value = self.critic(state)
         return mu, sigma, value
 
 def sample_action(mu, sigma):
@@ -67,25 +78,23 @@ def actor_critic_training(
     num_episodes=1000,
     max_steps=100,
     gamma=0.99,
-    alpha=.05,  # Critic learning rate
-    beta=.05,   # Actor learning rate
-    log_interval=100,
+    alpha=0.05,  # Critic learning rate
+    beta=0.05,   # Actor learning rate
+    log_interval=1,
     render=False,
     mujoco_model=None,
     mujoco_data=None,
     plot=False,
     epsilon=0.2,
-    fixed=False):
+    fixed=False,
+    log=True):
 
-    # Separate optimizers for actor and critic
-    actor_params = list(model.actor_head.parameters())
-    critic_params = list(model.backbone.parameters()) + list(model.critic_head.parameters())
-    
-    actor_optimizer = optim.Adam(actor_params, lr=beta)
-    critic_optimizer = optim.Adam(critic_params, lr=alpha)
+    # Define separate optimizers
+    actor_optimizer = optim.Adam(model.actor.parameters(), lr=alpha)
+    critic_optimizer = optim.Adam(model.critic.parameters(), lr=beta)
 
     starting_positions = []
-    episode_rewards = []
+    episode_rewards = []  # Store total reward for each episode
 
     if render:
         window, camera, scene, context, viewport, option = init_mujoco_render(mujoco_model)
@@ -99,20 +108,21 @@ def actor_critic_training(
             # Fixed starting position
             state = np.array([0.0, 0.0, 0.0, 0.0])
         else:
-            state = random_position(walls, outside_walls, goal_position, epsilon)
+            state = random_position(walls, outside_walls, goal_position)
             
         starting_positions.append(state[:2])  # Collect starting positions
-        
+
         if mujoco_model is not None and mujoco_data is not None:
             mujoco_data.qpos[0:2] = state[0:2]
             mujoco_data.qvel[0:2] = state[2:4]
             mujoco.mj_forward(mujoco_model, mujoco_data)  # Ensure the simulation state is updated
 
+        total_reward = 0  # Track total reward for the episode
+        
         for t in range(max_steps):
 
             # Convert state to tensor
             state_tensor = torch.tensor(state, dtype=torch.float32)
-            state_tensor.requires_grad = True  # Enable gradient computation
 
             # Forward pass to get action and value
             mu, sigma, value = model(state_tensor)
@@ -124,72 +134,100 @@ def actor_critic_training(
                 ball_body_id = mujoco.mj_name2id(mujoco_model, mujoco.mjtObj.mjOBJ_BODY, "ball")
                 mujoco_data.xfrc_applied[ball_body_id, :2] = action.detach().numpy()
                 mujoco.mj_step(mujoco_model, mujoco_data)
-                # Get next state from MuJoCo simulation
                 next_state = np.hstack((mujoco_data.qpos[0:2], mujoco_data.qvel[0:2]))
             else:
-                # If MuJoCo is not available, you can use the custom transition function
+                # If MuJoCo is not available, use the custom transition function
                 next_state = transition(state, action.detach().numpy())
 
+            # Calculate reward using the improved reward function
+            reward = calculate_reward(state, goal_position, epsilon, walls, outside_walls)
+
+            # Update total reward
+            total_reward += reward
+            
             # Check if the goal is reached
-            if np.linalg.norm(next_state - goal_state) <= epsilon:
-                reward = 1.0  # Accumulate total reward
-                done = True
-            else:
-                reward = 0.0
-                done = False
+            done = np.linalg.norm(next_state[:2] - goal_position) <= epsilon
 
             # Convert next_state to tensor
             next_state_tensor = torch.tensor(next_state, dtype=torch.float32)
 
             # Compute value of next state
             with torch.no_grad():
-                next_value = model.critic_head(model.backbone(next_state_tensor))
+                next_value = model.critic(next_state_tensor)
 
             # Compute TD target
             td_target = reward + gamma * next_value 
 
-            # Compute advantage by subtracting the baseline (value estimate)
+            # Compute advantage
             advantage = td_target - value
 
             # Compute losses
-            critic_loss = advantage.pow(2)
-            actor_loss = -advantage.detach() * log_prob
+            critic_loss = advantage.pow(2).mean()
+            actor_loss = -(advantage.detach() * log_prob).mean()
 
             # Backward passes
-            critic_loss.backward(retain_graph=True)
+            critic_optimizer.zero_grad()
+            actor_optimizer.zero_grad()
+            critic_loss.backward()
             actor_loss.backward()
 
             # Optimizer steps
             critic_optimizer.step()
             actor_optimizer.step()
-            
+
+            # Logging
+            if log:
+                print(f"Episode {episode}, Step {t}")
+                print(f"  - TD Error: {advantage.item()}")
+                print(f"  - Critic Loss: {critic_loss.item()}, Actor Loss: {actor_loss.item()}")
+                print(f"  - Action Mean: {mu}, Action Std: {sigma}")
+                print(f"  - Action Taken: {action}")
+
             if render and mujoco_model is not None and mujoco_data is not None:
                 render_mujoco_scene(mujoco_model, mujoco_data, scene, context, viewport, camera, window, option)
 
             if done:
-                episode_rewards.append(reward)
                 break
             
             state = next_state
 
-        # Append the total reward for the episode
-        critic_optimizer.zero_grad()
-        actor_optimizer.zero_grad()
+        # Store total reward for the episode
+        episode_rewards.append(total_reward)
+
+        # Log progress
+        if episode % log_interval == 0:
+            print(f"Episode {episode}, Total Reward: {total_reward}")
 
     if render:
         glfw.terminate()
-    
-    print(episode_rewards)
-    
+
     if plot:
-        plt.plot(episode_rewards)
+        # Plot learning curve
+        plt.figure(figsize=(10, 6))
+        plt.plot(episode_rewards, label="Total Reward per Episode")
         plt.xlabel("Episode")
-        plt.ylabel("Reward per Episode (Scaled by Steps)")
-        plt.title("Training Progress")
+        plt.ylabel("Total Reward")
+        plt.title("Learning Curve")
+        plt.legend()
         plt.show()
         plot_starting_points(starting_positions, goal_position, outside_walls, walls)
 
     return model
+
+def calculate_reward(state, goal_position, epsilon, walls, outside_walls):
+    
+    # Distance to the goal
+    distance_to_goal = np.linalg.norm(state[:2] - goal_position)
+    reward = -distance_to_goal  # Penalize distance from the goal
+
+    # Reward for reaching the goal
+    if distance_to_goal <= epsilon:
+        reward += 100.0  # Large positive reward
+
+    # Time penalty
+    reward -= 1  # Penalize each time step slightly
+
+    return reward
 
 def transition(state, action, dt=0.01):
     
@@ -245,13 +283,13 @@ def is_collision(position, walls):
             return True
     return False
 
-def random_position(walls, outside_walls, goal_position, epsilon, margin=0.02):
+def random_position(walls, outside_walls, goal_position):
     
     # Box boundaries
-    x_min = -0.15 + margin  # Right edge of gcase_a
-    x_max = 1.05 - margin   # Left edge of gcase_b
-    y_min = -0.32 + margin  # Top edge of gcase_d
-    y_max = 0.32 - margin   # Bottom edge of gcase_c
+    x_min = -0.15  
+    x_max = 1.05   
+    y_min = -0.32  
+    y_max = 0.32   
 
     while True:
         # Generate a random position within the box
@@ -262,7 +300,7 @@ def random_position(walls, outside_walls, goal_position, epsilon, margin=0.02):
         position = np.array([x, y])
 
         # Check if the position is inside wall_3 and not within epsilon of the goal
-        if not is_inside_wall(x, y) and np.linalg.norm(position - goal_position) > epsilon:
+        if not is_inside_wall(x, y):
             return np.array([x, y, vx, vy])
 
 def is_inside_wall(x, y):
@@ -310,8 +348,8 @@ def main():
     
     goal_position = np.array([1.0, 0.0])  # Fixed goal position (xg, yg)
     epsilon = 0.2  # Goal threshold
-    alpha = 0.001  # Critic learning rate
-    beta = 0.001   # Actor learning rate
+    alpha = 5e-5  # Critic learning rate
+    beta = 5e-5   # Actor learning rate
 
     walls = [
         {"x_min": 0.5, "x_max": 0.6, "y_min": -0.15, "y_max": 0.15}
@@ -326,7 +364,7 @@ def main():
     # Initialize MuJoCo model for rendering
     mujoco_model = mujoco.MjModel.from_xml_path("ball_square.xml")
     mujoco_data = mujoco.MjData(mujoco_model)
-    model = ActorCriticModel(input_dim=4, hidden_dim1=256, hidden_dim2=256, action_dim=2)
+    model = ActorCriticModel(input_dim=4, hidden_dim1=256, hidden_dim2=128, action_dim=2)
     
     while True:
         print("\nMenu:")
@@ -350,7 +388,7 @@ def main():
                 walls=walls,
                 outside_walls=outside_walls,
                 num_episodes=1,
-                max_steps=1800,
+                max_steps=3600,
                 gamma=0.99,
                 alpha=alpha,
                 beta=beta,
@@ -367,12 +405,12 @@ def main():
                 goal_position=goal_position,
                 walls=walls,
                 outside_walls=outside_walls,
-                num_episodes=10,
-                max_steps=1800,
+                num_episodes=100,
+                max_steps=1200,
                 gamma=0.99,
                 alpha=alpha,
                 beta=beta,
-                log_interval=100,
+                log_interval=1,
                 render=False,
                 plot=True,  # Plot training progress
                 epsilon=epsilon
