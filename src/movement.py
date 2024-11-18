@@ -410,7 +410,7 @@ def main():
             total_episodes += 1
         elif choice == 4:
             print("Exiting the program. Saving model...")
-            save_model(model, total_episodes)
+            #save_model(model, total_episodes)
             print("Goodbye!")
             break
         else:
