@@ -368,7 +368,7 @@ def main():
             total_episodes += 1
         elif choice == 2:
             print("Training the network...")
-            num_training_episodes = 10000
+            num_training_episodes = 100
             model = actor_critic_training(
                 model=model,
                 goal_position=goal_position,
