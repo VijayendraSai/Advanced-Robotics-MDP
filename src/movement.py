@@ -77,11 +77,11 @@ def actor_critic_training(
     goal_position,
     walls,
     outside_walls,
+    actor_optimizer,
+    critic_optimizer,
     num_episodes=1000,
     max_steps=100,
     gamma=0.99,
-    alpha=1e-5,
-    beta=1e-5, 
     log_interval=1,
     render=False,
     mujoco_model=None,
@@ -90,10 +90,6 @@ def actor_critic_training(
     epsilon=0.2,
     fixed=False,
     log=True):
-
-    actor_optimizer = optim.Adam(model.actor.parameters(), lr=alpha)
-    critic_optimizer = optim.Adam(model.critic.parameters(), lr=beta)
-
     starting_positions = []
     episode_rewards = []  
 
@@ -331,7 +327,9 @@ def main():
     mujoco_model = mujoco.MjModel.from_xml_path("ball_square.xml")
     mujoco_data = mujoco.MjData(mujoco_model)
     model = ActorCriticModel(input_dim=4, hidden_dim1=256, hidden_dim2=128, hidden_dim3=64, action_dim=2)
-    
+    actor_optimizer = optim.Adam(model.actor.parameters())
+    critic_optimizer = optim.Adam(model.critic.parameters())
+   
     while True:
         print("\nMenu:")
         print("1. Render one training episode")
@@ -353,6 +351,8 @@ def main():
                 goal_position=goal_position,
                 walls=walls,
                 outside_walls=outside_walls,
+                actor_optimizer=actor_optimizer,
+                critic_optimizer=critic_optimizer,
                 num_episodes=3,
                 max_steps=1800,
                 gamma=0.99,
