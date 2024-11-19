@@ -70,7 +70,7 @@ class ActorCriticModel(nn.Module):
 def sample_action(mu, sigma):
     dist = torch.distributions.Normal(mu, sigma)
     action = dist.sample()
-    return action.clamp(-5, 5), dist
+    return action.clamp(-1, 1), dist
 
 def actor_critic_training(
     model,
@@ -90,8 +90,11 @@ def actor_critic_training(
     epsilon=0.2,
     fixed=False,
     log=True):
+    
     starting_positions = []
-    episode_rewards = []  
+    episode_rewards = []
+    actor_losses = []
+    critic_losses = []
 
     if render:
         window, camera, scene, context, viewport, option = init_mujoco_render(mujoco_model)
@@ -112,9 +115,13 @@ def actor_critic_training(
             mujoco.mj_forward(mujoco_model, mujoco_data)
 
         total_reward = 0
+        
         for t in range(max_steps):
 
             # forward pass to get action and value
+            critic_optimizer.zero_grad()
+            actor_optimizer.zero_grad()
+            
             state_tensor = torch.tensor(state, dtype=torch.float32)
             mu, sigma, value = model(state_tensor)
             action, dist = sample_action(mu, sigma)
@@ -131,7 +138,7 @@ def actor_critic_training(
                 next_state = transition(state, action.detach().numpy())
 
             # calculate reward
-            reward = calculate_reward(state, goal_position, epsilon, walls, outside_walls)
+            reward = calculate_reward(state, goal_position, epsilon, t)
 
             # update total reward
             total_reward += reward
@@ -147,13 +154,10 @@ def actor_critic_training(
             critic_loss = F.mse_loss(value, td_target.detach())
             actor_loss = -(advantage.detach() * log_prob).mean()
 
-            # entropy bonus
-            entropy = dist.entropy().mean()
-            actor_loss -= 0.01 * entropy  # 0.01 is the entropy coefficient
+            actor_losses.append(actor_loss.item())
+            critic_losses.append(critic_loss.item()) 
             
             # backpropagation
-            critic_optimizer.zero_grad()
-            actor_optimizer.zero_grad()
             critic_loss.backward()
             actor_loss.backward()
 
@@ -194,14 +198,28 @@ def actor_critic_training(
         plt.show()
         plot_starting_points(starting_positions, goal_position, outside_walls, walls)
 
+        # Plot the losses
+        plt.figure(figsize=(12, 6))
+
+        # Plot both losses on the same chart
+        plt.plot(critic_losses, label="Critic Loss", alpha=0.7)
+        plt.plot(actor_losses, label="Actor Loss", alpha=0.7)
+        plt.xlabel("Training Steps")
+        plt.ylabel("Loss")
+        plt.title("Critic and Actor Loss Over Training")
+        plt.legend()
+        plt.show()
+
     return model
 
-def calculate_reward(state, goal_position, epsilon, walls, outside_walls):
-
+def calculate_reward(state, goal_position, epsilon, t):
+    
     distance_to_goal = np.linalg.norm(state[:2] - goal_position)
-    reward = 1 / (distance_to_goal + 1e-5)  # Avoid division by zero
+    reward = -distance_to_goal * 1.75
     if distance_to_goal <= epsilon:
-        reward += 1.0
+        reward += 6000
+    reward -= 1e-20 * t
+
     return reward
 
 def transition(state, action, dt=0.01):
@@ -246,10 +264,10 @@ def plot_starting_points(starting_positions, goal_position, outside_walls, walls
 
 def random_position(walls, outside_walls, goal_position):
     
-    x_min = -0.15  
-    x_max = 1.05   
-    y_min = -0.32  
-    y_max = 0.32   
+    x_min = -0.2 
+    x_max = 1.1  
+    y_min = -0.36
+    y_max = 0.36 
 
     while True:
         x = random.uniform(x_min, x_max)
@@ -262,12 +280,25 @@ def random_position(walls, outside_walls, goal_position):
 
 def is_inside_wall(x, y):
     
-    wall_3_x_min = 0.5      
-    wall_3_x_max = 0.5 + 0.1  
-    wall_3_y_min = -0.15 
-    wall_3_y_max = 0.15  
+    safety_margin = 0.1
 
-    return wall_3_x_min <= x <= wall_3_x_max and wall_3_y_min <= y <= wall_3_y_max
+    case_x_min = -0.2 + safety_margin
+    case_x_max = 1.1 - safety_margin
+    case_y_min = -0.36 + safety_margin
+    case_y_max = 0.36 - safety_margin
+
+    if not (case_x_min <= x <= case_x_max and case_y_min <= y <= case_y_max):
+        return True
+
+    wall_3_x_min = 0.5 - safety_margin
+    wall_3_x_max = 0.5 + 0.1 + safety_margin
+    wall_3_y_min = -0.15 - safety_margin
+    wall_3_y_max = 0.15 + safety_margin
+
+    if wall_3_x_min <= x <= wall_3_x_max and wall_3_y_min <= y <= wall_3_y_max:
+        return True
+
+    return False
 
 def init_mujoco_render(model):
     if not glfw.init():
@@ -309,9 +340,7 @@ def save_model(model, total_episodes, save_dir="../model"):
 def main():
     
     goal_position = np.array([0.8, 0.0])  
-    epsilon = 0.2 
-    alpha = 1e-6  
-    beta = 1e-6   
+    epsilon = 0.2
     total_episodes = 0
 
     walls = [
@@ -321,14 +350,16 @@ def main():
         [[-0.5, -0.4], [-0.5, 0.4]],
         [[1.5, -0.4], [1.5, 0.4]],
         [[-0.5, 0.4], [1.5, 0.4]],
-        [[-0.5, -0.4], [1.5, -0.4]],
-    ]
+        [[-0.5, -0.4], [1.5, -0.4]],]
 
     mujoco_model = mujoco.MjModel.from_xml_path("ball_square.xml")
+    mujoco_model.opt.timestep = 0.1
     mujoco_data = mujoco.MjData(mujoco_model)
     model = ActorCriticModel(input_dim=4, hidden_dim1=256, hidden_dim2=128, hidden_dim3=64, action_dim=2)
-    actor_optimizer = optim.Adam(model.actor.parameters())
-    critic_optimizer = optim.Adam(model.critic.parameters())
+    
+    # optimize the parameters
+    actor_optimizer = optim.Adam(model.actor.parameters(), lr=1e-5)
+    critic_optimizer = optim.Adam(model.critic.parameters(), lr=1e-5)
    
     while True:
         print("\nMenu:")
@@ -346,6 +377,7 @@ def main():
 
         if choice == 1:
             print("Rendering one training episode...")
+            num_training_episodes = 1
             actor_critic_training(
                 model=model,
                 goal_position=goal_position,
@@ -353,11 +385,9 @@ def main():
                 outside_walls=outside_walls,
                 actor_optimizer=actor_optimizer,
                 critic_optimizer=critic_optimizer,
-                num_episodes=3,
+                num_episodes=num_training_episodes,
                 max_steps=1800,
                 gamma=0.99,
-                alpha=alpha,
-                beta=beta,
                 log_interval=1,
                 render=True,
                 mujoco_model=mujoco_model,
@@ -365,7 +395,7 @@ def main():
                 epsilon=epsilon,
                 fixed=False
             )
-            total_episodes += 1
+            total_episodes += num_training_episodes
         elif choice == 2:
             print("Training the network...")
             num_training_episodes = 100
@@ -374,11 +404,11 @@ def main():
                 goal_position=goal_position,
                 walls=walls,
                 outside_walls=outside_walls,
+                actor_optimizer=actor_optimizer,
+                critic_optimizer=critic_optimizer,
                 num_episodes=num_training_episodes,
-                max_steps=3600,
+                max_steps=1800,
                 gamma=0.99,
-                alpha=alpha,
-                beta=beta,
                 log_interval=1,
                 render=False,
                 plot=True,
@@ -387,16 +417,17 @@ def main():
             total_episodes += num_training_episodes
         elif choice == 3:
             print("Rendering with fixed starting position...")
+            num_training_episodes = 1
             actor_critic_training(
                 model=model,
                 goal_position=goal_position,
                 walls=walls,
                 outside_walls=outside_walls,
-                num_episodes=1,
-                max_steps=3600,
+                actor_optimizer=actor_optimizer,
+                critic_optimizer=critic_optimizer,
+                num_episodes=num_training_episodes,
+                max_steps=1800,
                 gamma=0.99,
-                alpha=1e-2,
-                beta=1e-2,
                 log_interval=1,
                 render=True,
                 mujoco_model=mujoco_model,
@@ -404,10 +435,9 @@ def main():
                 epsilon=epsilon,
                 fixed=True
             )
-            total_episodes += 1
+            total_episodes += num_training_episodes
         elif choice == 4:
             print("Goodbye!")
-            save_model(model, total_episodes)
             break
         else:
             print("Invalid choice. Please select from the menu.")
