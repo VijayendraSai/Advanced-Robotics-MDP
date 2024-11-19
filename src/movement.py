@@ -218,7 +218,7 @@ def calculate_reward(state, goal_position, epsilon, t):
     reward = -distance_to_goal * 2
     if distance_to_goal <= epsilon:
         reward += 5000
-    reward -= .01 * t
+    reward -= 1e-5 * t
 
     return reward
 
@@ -280,7 +280,7 @@ def random_position(walls, outside_walls, goal_position):
 
 def is_inside_wall(x, y):
     
-    safety_margin = 0.2
+    safety_margin = 0.05
 
     case_x_min = -0.2 + safety_margin
     case_x_max = 1.1 - safety_margin
@@ -339,8 +339,8 @@ def save_model(model, total_episodes, save_dir="../model"):
 
 def main():
     
-    goal_position = np.array([0.8, 0.0])  
-    epsilon = 0.2
+    goal_position = np.array([1.0, 0.0])  
+    epsilon = 0.1
     total_episodes = 0
 
     walls = [
