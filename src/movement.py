@@ -215,10 +215,10 @@ def actor_critic_training(
 def calculate_reward(state, goal_position, epsilon, t):
     
     distance_to_goal = np.linalg.norm(state[:2] - goal_position)
-    reward = -distance_to_goal * 1.75
+    reward = -distance_to_goal * 2
     if distance_to_goal <= epsilon:
-        reward += 6000
-    reward -= 1e-20 * t
+        reward += 5000
+    reward -= .01 * t
 
     return reward
 
@@ -280,7 +280,7 @@ def random_position(walls, outside_walls, goal_position):
 
 def is_inside_wall(x, y):
     
-    safety_margin = 0.1
+    safety_margin = 0.2
 
     case_x_min = -0.2 + safety_margin
     case_x_max = 1.1 - safety_margin
@@ -407,10 +407,12 @@ def main():
                 actor_optimizer=actor_optimizer,
                 critic_optimizer=critic_optimizer,
                 num_episodes=num_training_episodes,
+                mujoco_model=mujoco_model,
+                mujoco_data=mujoco_data,
                 max_steps=1800,
                 gamma=0.99,
                 log_interval=1,
-                render=False,
+                render=True,
                 plot=True,
                 epsilon=epsilon
             )
