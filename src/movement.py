@@ -13,6 +13,7 @@ import torch
 from datetime import datetime
 
 class ActorNetwork(nn.Module):
+    
     def __init__(self, input_dim, hidden_dim1, hidden_dim2, hidden_dim3, output_dim):
         super(ActorNetwork, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim1)
@@ -36,6 +37,7 @@ class ActorNetwork(nn.Module):
         return mu, sigma
 
 class CriticNetwork(nn.Module):
+    
     def __init__(self, input_dim, hidden_dim1, hidden_dim2, hidden_dim3):
         super(CriticNetwork, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim1)
@@ -43,12 +45,10 @@ class CriticNetwork(nn.Module):
         self.fc3 = nn.Linear(hidden_dim2, hidden_dim3)
         self.fc_value = nn.Linear(hidden_dim3, 1)
         self.initialize_weights()
-
     def initialize_weights(self):
         for layer in [self.fc1, self.fc2, self.fc3, self.fc_value]:
             nn.init.xavier_uniform_(layer.weight)
             nn.init.zeros_(layer.bias)
-
     def forward(self, state):
         x = torch.relu(self.fc1(state))
         x = torch.relu(self.fc2(x))
@@ -67,10 +67,57 @@ class ActorCriticModel(nn.Module):
         value = self.critic(state)
         return mu, sigma, value
 
+def init_mujoco_render(model):
+    
+    if not glfw.init():
+        raise Exception("Could not initialize GLFW")
+
+    window = glfw.create_window(800, 600, "MuJoCo Simulation", None, None)
+    if not window:
+        glfw.terminate()
+        raise Exception("Could not create GLFW window")
+
+    glfw.make_context_current(window)
+    camera = mujoco.MjvCamera()
+    scene = mujoco.MjvScene(model, maxgeom=10000)
+    context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
+    viewport = mujoco.MjrRect(0, 0, 800, 600)
+    option = mujoco.MjvOption()
+
+    camera.azimuth = 0
+    camera.elevation = -90
+    camera.distance = 2.0
+    camera.lookat = np.array([0.5, 0.0, 0.0])
+
+    return window, camera, scene, context, viewport, option
+
+def render_mujoco_scene(model, data, scene, context, viewport, camera, window, option):
+    
+    mujoco.mjv_updateScene(model, data, option, None, camera, mujoco.mjtCatBit.mjCAT_ALL.value, scene)
+    mujoco.mjr_render(viewport, scene, context)
+    glfw.swap_buffers(window)
+    glfw.poll_events()
+    
+    return
+
 def sample_action(mu, sigma):
+    
     dist = torch.distributions.Normal(mu, sigma)
     action = dist.sample()
+    
     return action.clamp(-1, 1), dist
+
+def transition(state, action, dt=0.01):
+    
+    x, y, vx, vy = state
+    fx, fy = action
+    noise_x, noise_y = np.random.normal(0, 0.1, 2)
+    new_vx = vx + (fx - noise_x) * dt
+    new_vy = vy + (fy - noise_y) * dt
+    new_x = x + new_vx * dt
+    new_y = y + new_vy * dt
+
+    return np.array([new_x, new_y, new_vx, new_vy])
 
 def actor_critic_training(
     model,
@@ -115,6 +162,7 @@ def actor_critic_training(
             mujoco.mj_forward(mujoco_model, mujoco_data)
 
         total_reward = 0
+        prev_state = state
         
         for t in range(max_steps):
 
@@ -152,8 +200,8 @@ def actor_critic_training(
             td_target = reward + gamma * next_value
             advantage = td_target - value
             critic_loss = F.mse_loss(value, td_target.detach())
+            
             actor_loss = -(advantage.detach() * log_prob).mean()
-
             actor_losses.append(actor_loss.item())
             critic_losses.append(critic_loss.item()) 
             
@@ -178,10 +226,11 @@ def actor_critic_training(
             if done:
                 break
             
+            prev_state = state
             state = next_state
 
         # store the total reward for the episode
-        episode_rewards.append(total_reward/t if t > 0 else 0)
+        episode_rewards.append(total_reward/(t+1) if t > 0 else 0)
         if episode % log_interval == 0:
             print(f"Episode {episode}, Total Reward: {total_reward}")
 
@@ -189,26 +238,9 @@ def actor_critic_training(
         glfw.terminate()
 
     if plot:
-        plt.figure(figsize=(10, 6))
-        plt.plot(episode_rewards, label="Avg. Reward per Episode")
-        plt.xlabel("Episode")
-        plt.ylabel("Avg. Reward")
-        plt.title("Learning Curve")
-        plt.legend()
-        plt.show()
-        plot_starting_points(starting_positions, goal_position, outside_walls, walls)
-
-        # Plot the losses
-        plt.figure(figsize=(12, 6))
-
-        # Plot both losses on the same chart
-        plt.plot(critic_losses, label="Critic Loss", alpha=0.7)
-        plt.plot(actor_losses, label="Actor Loss", alpha=0.7)
-        plt.xlabel("Training Steps")
-        plt.ylabel("Loss")
-        plt.title("Critic and Actor Loss Over Training")
-        plt.legend()
-        plt.show()
+        plot_starting_points(starting_positions, goal_position, outside_walls, walls, epsilon)
+        plot_learning_curve(episode_rewards)
+        plot_loss_curve(critic_losses, actor_losses)
 
     return model
 
@@ -217,145 +249,111 @@ def calculate_reward(state, goal_position, epsilon, t):
     distance_to_goal = np.linalg.norm(state[:2] - goal_position)
     reward = -distance_to_goal * 2
     if distance_to_goal <= epsilon:
-        reward += 5000
-    reward -= 1e-5 * t
+        reward += 10000
+    reward -= 1e-2 * t
 
     return reward
 
-def transition(state, action, dt=0.01):
-    
-    x, y, vx, vy = state
-    fx, fy = action
-    noise_x, noise_y = np.random.normal(0, 0.1, 2)
-    new_vx = vx + (fx - noise_x) * dt
-    new_vy = vy + (fy - noise_y) * dt
-    new_x = x + new_vx * dt
-    new_y = y + new_vy * dt
-
-    return np.array([new_x, new_y, new_vx, new_vy])
-
-def plot_starting_points(starting_positions, goal_position, outside_walls, walls):
-
-    plt.figure()
-    starting_positions = np.array(starting_positions)
-    plt.scatter(starting_positions[:, 0], starting_positions[:, 1], color='blue', label='Starting Positions')
-    plt.scatter(goal_position[0], goal_position[1], color='red', marker='*', s=100, label='Goal Position')
-    
-    for wall in outside_walls:
-        x_values = [wall[0][0], wall[1][0]]
-        y_values = [wall[0][1], wall[1][1]]
-        plt.plot(x_values, y_values, color="black")
-    
-    for wall in walls:
-        x_min = wall['x_min']
-        x_max = wall['x_max']
-        y_min = wall['y_min']
-        y_max = wall['y_max']
-        rectangle = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, color='grey', alpha=0.5)
-        plt.gca().add_patch(rectangle)
-
-    plt.xlabel("X Position")
-    plt.ylabel("Y Position")
-    plt.title("Starting Points on 2D Map")
-    plt.legend()
-    plt.show()
-
-    return
-
 def random_position(walls, outside_walls, goal_position):
     
-    x_min = -0.2 
-    x_max = 1.1  
-    y_min = -0.36
-    y_max = 0.36 
+    x_min = outside_walls['x_min'] 
+    x_max = outside_walls['x_max']
+    y_min = outside_walls['y_min']
+    y_max = outside_walls['y_max']
 
     while True:
         x = random.uniform(x_min, x_max)
         y = random.uniform(y_min, y_max)
         vx, vy = 0.0, 0.0
-
         position = np.array([x, y])
-        if not is_inside_wall(x, y):
+        if not is_inside_wall(x, y, walls, outside_walls):
             return np.array([x, y, vx, vy])
 
-def is_inside_wall(x, y):
+def is_inside_wall(x, y, walls, outside_walls):
     
-    safety_margin = 0.05
-
-    case_x_min = -0.2 + safety_margin
-    case_x_max = 1.1 - safety_margin
-    case_y_min = -0.36 + safety_margin
-    case_y_max = 0.36 - safety_margin
-
-    if not (case_x_min <= x <= case_x_max and case_y_min <= y <= case_y_max):
+    safety_margin = 0.075
+    if not (outside_walls['x_min'] + safety_margin <= x <= outside_walls['x_max'] - safety_margin and
+            outside_walls['y_min'] + safety_margin <= y <= outside_walls['y_max'] - safety_margin):
         return True
-
-    wall_3_x_min = 0.5 - safety_margin
-    wall_3_x_max = 0.5 + 0.1 + safety_margin
-    wall_3_y_min = -0.15 - safety_margin
-    wall_3_y_max = 0.15 + safety_margin
-
-    if wall_3_x_min <= x <= wall_3_x_max and wall_3_y_min <= y <= wall_3_y_max:
+    if (walls['x_min'] - safety_margin <= x <= walls['x_max'] + safety_margin and
+            walls['y_min'] - safety_margin <= y <= walls['y_max'] + safety_margin):
         return True
-
     return False
 
-def init_mujoco_render(model):
-    if not glfw.init():
-        raise Exception("Could not initialize GLFW")
+def plot_loss_curve(critic_losses, actor_losses):
+     
+     plt.figure(figsize=(12, 6))
+     plt.plot(critic_losses, label="Critic Loss", alpha=0.7)
+     plt.plot(actor_losses, label="Actor Loss", alpha=0.7)
+     plt.xlabel("Training Steps")
+     plt.ylabel("Loss")
+     plt.title("Critic and Actor Loss Over Training")
+     plt.legend()
+     plt.show()
+     
+     return
 
-    window = glfw.create_window(800, 600, "MuJoCo Simulation", None, None)
-    if not window:
-        glfw.terminate()
-        raise Exception("Could not create GLFW window")
+def plot_learning_curve(episode_rewards):
 
-    glfw.make_context_current(window)
-    camera = mujoco.MjvCamera()
-    scene = mujoco.MjvScene(model, maxgeom=10000)
-    context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
-    viewport = mujoco.MjrRect(0, 0, 800, 600)
-    option = mujoco.MjvOption()
+    window_size = 10  # Adjust this for smoothing (e.g., 10 episodes)
+    moving_avg_rewards = np.convolve(episode_rewards, np.ones(window_size) / window_size, mode='valid')
+    plt.figure(figsize=(10, 6))
+    plt.plot(episode_rewards, label="Avg. Reward per Episode", alpha=0.5)
+    plt.plot(range(window_size - 1, len(episode_rewards)), moving_avg_rewards, label=f"Moving Average (window={window_size})", color='orange')
+    plt.xlabel("Episode")
+    plt.ylabel("Avg. Reward")
+    plt.title("Learning Curve with Moving Average")
+    plt.legend()
+    plt.show()
 
-    camera.azimuth = 0
-    camera.elevation = -90
-    camera.distance = 2.0
-    camera.lookat = np.array([0.5, 0.0, 0.0])
+    return 
 
-    return window, camera, scene, context, viewport, option
+def plot_starting_points(starting_positions, goal_position, outside_walls, wall, epsilon):
 
-def render_mujoco_scene(model, data, scene, context, viewport, camera, window, option):
-    mujoco.mjv_updateScene(model, data, option, None, camera, mujoco.mjtCatBit.mjCAT_ALL.value, scene)
-    mujoco.mjr_render(viewport, scene, context)
-    glfw.swap_buffers(window)
-    glfw.poll_events()
-    return
+    plt.figure(figsize=(10, 8))
+    starting_positions = np.array(starting_positions)
+    plt.scatter(starting_positions[:, 0], starting_positions[:, 1], color='blue', label='Starting Positions')
+    plt.scatter(goal_position[0], goal_position[1], color='red', marker='*', s=150, label='Goal Position')
 
-def save_model(model, total_episodes, save_dir="../model"):
-    os.makedirs(save_dir, exist_ok=True)      
-    save_path = os.path.join(save_dir, f"actor_critic_model_{total_episodes}_episodes.pt")
-    torch.save(model.state_dict(), save_path)
-    print(f"Model saved to {save_path}")
+    epsilon_circle = patches.Circle((goal_position[0], goal_position[1]), epsilon,
+                                     color='green', alpha=0.2, label=f"Epsilon Radius ({epsilon})")
+    plt.gca().add_patch(epsilon_circle)
+
+    x_min, x_max = outside_walls['x_min'], outside_walls['x_max']
+    y_min, y_max = outside_walls['y_min'], outside_walls['y_max']
+    boundary = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min,
+                                  edgecolor="black", facecolor="none", linewidth=2, label="Outside Walls")
+    plt.gca().add_patch(boundary)
+    x_min = wall['x_min']
+    x_max = wall['x_max']
+    y_min = wall['y_min']
+    y_max = wall['y_max']
+    rectangle = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min,
+                                   color='grey', alpha=0.5, label="Wall")
+    plt.gca().add_patch(rectangle)
+
+    plt.xlabel("X Position")
+    plt.ylabel("Y Position")
+    plt.title("Starting Points and Environment Layout")
+    plt.legend()
+    plt.grid(True)
+    plt.axis("equal")
+    plt.show()
+
     return
 
 def main():
     
-    goal_position = np.array([1.0, 0.0])  
+    goal_position = np.array([0.8, 0.0])  
     epsilon = 0.1
     total_episodes = 0
-
-    walls = [
-        {"x_min": 0.5, "x_max": 0.6, "y_min": -0.15, "y_max": 0.15}
-    ]
-    outside_walls = [
-        [[-0.5, -0.4], [-0.5, 0.4]],
-        [[1.5, -0.4], [1.5, 0.4]],
-        [[-0.5, 0.4], [1.5, 0.4]],
-        [[-0.5, -0.4], [1.5, -0.4]],]
+    walls = {"x_min": 0.5, "x_max": 0.6, "y_min": -0.15, "y_max": 0.15}
+    outside_walls = {"x_min": -0.2, "x_max": 1.1, "y_min": -0.36, "y_max": 0.36}     
 
     mujoco_model = mujoco.MjModel.from_xml_path("ball_square.xml")
     mujoco_model.opt.timestep = 0.1
     mujoco_data = mujoco.MjData(mujoco_model)
-    model = ActorCriticModel(input_dim=4, hidden_dim1=256, hidden_dim2=128, hidden_dim3=64, action_dim=2)
+    model = ActorCriticModel(input_dim=4, hidden_dim1=32, hidden_dim2=64, hidden_dim3=32, action_dim=2)
     
     # optimize the parameters
     actor_optimizer = optim.Adam(model.actor.parameters(), lr=1e-5)
@@ -398,7 +396,7 @@ def main():
             total_episodes += num_training_episodes
         elif choice == 2:
             print("Training the network...")
-            num_training_episodes = 100
+            num_training_episodes = 200
             model = actor_critic_training(
                 model=model,
                 goal_position=goal_position,
@@ -412,7 +410,6 @@ def main():
                 max_steps=1800,
                 gamma=0.99,
                 log_interval=1,
-                render=True,
                 plot=True,
                 epsilon=epsilon
             )
