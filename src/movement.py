@@ -249,8 +249,8 @@ def calculate_reward(state, goal_position, epsilon, t):
     distance_to_goal = np.linalg.norm(state[:2] - goal_position)
     reward = -distance_to_goal * 2
     if distance_to_goal <= epsilon:
-        reward += 5000
-    reward -= 1e-3 * t
+        reward += 6500
+    reward -= 1e-2 * t
 
     return reward
 
@@ -396,7 +396,7 @@ def main():
             total_episodes += num_training_episodes
         elif choice == 2:
             print("Training the network...")
-            num_training_episodes = 1000
+            num_training_episodes = 360
             model = actor_critic_training(
                 model=model,
                 goal_position=goal_position,
