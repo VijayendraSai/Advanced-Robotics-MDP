@@ -8,18 +8,18 @@
 \usepackage{subcaption}
 \geometry{a4paper, margin=1in}
 
-\title{Actor-Critic Reinforcement Learning in MuJoCo}
+\title{Actor-Critic Reinforcement Learning}
 \author{
     Mark Doughten [MD1875] \\
     Vijayendra Sai Chennareddy [VC545] \\
     Shubham Patil [SP2484]
 }
-\date{\today}
+\date{November 20, 2024}
 \begin{document}
 \maketitle
 
 \section{Introduction}
-This report outlines the implementation of an Actor-Critic reinforcement learning (RL) framework a MuJoCo simulation environment. The objective is training a robot on the environment and understanding how it can reach the goal. This paper describes how this is achieved using neural networks for policy learning and value estimation with a reward function designed to encourage goal seeking. The transition function outlines the expected behavior. The transition function is defined as follows:
+ The objective is training a robot on how to reach a specific goal area using reinforcement learning, specifically an Actor-Critic framework. The report shows how the robot was trained and the rewards associated with each action. The framework requires using two neural networks for policy learning and value estimation with a reward function designed to encourage goal seeking. The transition function outlines the expected behavior. As a guide, the transition function is defined as follows:
 
 \begin{align*}
 \dot{x}_{t+1} &= \dot{x}_t + (f_{x,t} - \rho_{x,t}) \Delta t, \\
@@ -28,12 +28,11 @@ x_{t+1} &= x_t + \dot{x}_t \Delta t, \\
 y_{t+1} &= y_t + \dot{y}_t \Delta t.
 \end{align*}
 
-where \( \rho_{x,t} \) and \( \rho_{y,t} \) are small independent noises, sampled from \( \mathcal{N}(0, 0.1) \) at each time step \( t \), and \( \Delta t \) is set to 0.1 seconds. We assume here that the robot has a mass of 1~kg. You can interpret the force noises as air resistance or random friction (although air resistance should scale up as a function of velocity).
+where \( \rho_{x,t} \) and \( \rho_{y,t} \) are small independent noises, sampled from \( \mathcal{N}(0, 0.1) \) at each time step \( t \), and \( \Delta t \) is set to 0.1 seconds. The transition function contextualizes the inputs into the actor neural network and transfers easily over to MuJoCo since the position is recorded through the episodes and force can get applied.
 
-\section{Environment}
-The environment is a 3D course simulated in MuJoCo, featuring obstacles and boundaries. The robot is subjected to forces in the \(x\)- and \(y\)-directions. The actor applies a force on the robot based on the current policy. The reward function incentives reaching the goal and penalizes wasting time. The initial state is obtained by sampling the
-position of the robot uniformly in the workspace of the robot, and setting
-its initial velocity to 0. An example of how the points were selected during a batch training session, showing the initial starting positions are random. 
+\section{Map}
+
+The environment is a course featuring obstacles and boundaries. The initial state is obtained through sampling the position of the robot uniformly in the workspace of the robot and setting the initial velocity to 0.  The goal position is fixed on (0.8, 0.0) and the epsilon is 0.1. Overall, this is a challenging configuration since the robot needs to learn how to travel above or below the obstacle in the middle. An example of how the points are selected during training sessions, showing the initial starting positions are random.
 
 \begin{figure}[H]
     \centering
@@ -42,18 +41,10 @@ its initial velocity to 0. An example of how the points were selected during a b
     \label{fig:trajectory}
 \end{figure}
 
-The goal position is fixed on (0.8, 0.0) and the epsilon is 0.1. Overall, this was a challenging configuration since the robot needs to learn how to travel above or below the obstacle in the middle. It makes a simple reward function like distance to the goal not beneficial since the robot will find an optimal point on the side closest. 
+There are instances when the robot spawns on the goal and receives an immediate reward. An issue when the goal reward is high is the robot not exploring adequately since it was accustomed to reward nearby.
 
 \section{Actor-Critic Model}
 
-The framework for the Actor-Critic model is based on Hado van Hasselt's lecture. 
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{report/images/slide40.PNG}
-    \caption{Pseudocode}
-    \label{fig:slide40}
-\end{figure}
 
 The Actor-Critic architecture comprises two neural networks:
 \begin{itemize}
@@ -68,13 +59,6 @@ The actor network processes the robot's state (\(x, y, v_x, v_y\)) through three
 \pi(a|s) \sim \mathcal{N}(\mu(s), \sigma(s)),
 \end{equation}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{report/images/nn.png}
-    \caption{Actor Network Architecture}
-    \label{fig:actor_network}
-\end{figure}
-
 \subsection{Critic Network}
 The critic network uses the same input as the actor and a single scalar value that represents the estimated state value \(V(s)\). This value guides the actor policy by estimating the advantage of actions. The two networks work together to achieve the optimal actions based on the policy gradient.
 
@@ -86,7 +70,7 @@ The critic network uses the same input as the actor and a single scalar value th
     \]
     \item \textbf{Critic Loss:} Minimizes the temporal difference (TD) error:
     \[
-    L_\text{critic} = \frac{1}{2} (\text{TD Target} - V(s))^2.
+    L_\text{critic} = \frac{1}{2} (\text{TD} - V(s))^2.
     \]
 \end{itemize}
 
@@ -100,15 +84,26 @@ The critic network uses the same input as the actor and a single scalar value th
 \section{Training}
 
 \subsection{Reward Function}
-The reward function balances three objectives:
+The reward function incentives reaching the goal and penalizes wasting time. Since the obstacle add complexity, a simple reward function like distance to the goal not beneficial since the robot finds an optimal point on the closest side to not incur the cost to go around. The reward function balances three objectives:
+
 \begin{itemize}
     \item \textbf{Distance to Goal:} Encourages progress toward the goal with a linear penalty proportional to the distance.
     \item \textbf{Time Penalty:} Incentives finding the goal quicker during each episode. 
 \end{itemize}
 
 \subsection{Method}
-The training process allows the user to set the duration and the number of steps. In our case, we typically set the number of steps to 1800 and episodes vary based on the session. While we can train in batch, a user can view a training session in between the batches to see the progression. Likewise, we have the option to run from a fixed point and 
-The training loop iteratively performs the following steps:
+
+The Actor-Critic model in this experiment is based on Hado van Hasselt's lecture. 
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{report/images/slide40.PNG}
+    \caption{Pseudocode}
+    \label{fig:slide40}
+\end{figure}
+
+The training process allows the user to set the duration and the number of steps. In our case, we typically set the number of steps to 1800 and episodes vary based on the session. While we can train in batch, a user can view a training session in between the batches to see the progression. Likewise, we have the option to run from a fixed point and The training loop iteratively performs the following steps:
+
 \begin{enumerate}
     \item Initialize the state \(s_0\).
     \item Use the actor network to sample an action \(a_t\).
@@ -116,13 +111,13 @@ The training loop iteratively performs the following steps:
     \item Compute the temporal difference (TD):
     \[\text{TD} = r_t + \gamma V(s_{t+1}),\]
     where $\gamma=0.99$ is the discount factor.
-    \item Backpropagation to the actor and critic networks using their respective loss functions.
+    \item Backpropagation for the actor and critic networks using their respective loss functions.
 \end{enumerate}
 
 \section{Results}
 
 \subsection{Learning Curve}
-The model achieves consistent improvements in reward over episodes. Figure \ref{fig:learning_curve} illustrates the average reward per episode during training.
+The model achieves consistent improvements in reward over episodes. The recorded average reward per episode during training.
 
 \begin{figure}[H]
     \centering
@@ -132,7 +127,7 @@ The model achieves consistent improvements in reward over episodes. Figure \ref{
 \end{figure}
 
 \section{Conclusion}
-The Actor-Critic reinforcement learning framework demonstrates effective navigation to the goal in a 3D simulated environment. Future work could involve extending this approach for submersibles and obstacle avoidance using sensors.
+The Actor-Critic reinforcement learning framework demonstrates effective navigation to the goal in a simulated environment. Future work involves extending this approach to submersibles and implementing sensors obstacle.
 
 \begin{thebibliography}{}
 \raggedright
