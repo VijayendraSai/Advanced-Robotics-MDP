@@ -1,31 +1,83 @@
-# Advanced-Robotics-MDP
-Let us revisit the same navigation problem that you solved in HW 1, and con-
-sider the following MDP:
+# Actor-Critic Reinforcement Learning for Noisy Robot Navigation
 
-• Action at = (fx,t,fy,t), where fx,t is the force applied on the robot in the x-dimension, and fy,t is the force applied on the robot in the y-dimension. Both fx,t and fy,t are limited to values in the interval [−1 Newton, 1 Newton].
+## 🧭 Overview
 
-• State st = (xt,yt,x ̇t,y ̇t) is the position and velocity of the robot. At the beginning of each episode, the initial state is obtained by sampling the position of the robot uniformly in the workspace of the robot, and setting its initial velocity to 0.
+This project revisits the 2D navigation problem with a formalized Markov Decision Process (MDP), modeling force-based control under stochastic dynamics. A custom actor-critic algorithm is implemented using neural networks to learn optimal policies in the MuJoCo simulator.
 
-• The transition function is defined as follows:
+---
 
-       x ̇ t+1 = x ̇ t + (fx,t − ρx,t )∆t
-       
-       y ̇t+1 = y ̇t + (fy,t − ρy,t)∆t
-       
-       xt+1 = xt+x ̇t∆t
-       
-       yt+1 = xt+y ̇t∆t
-    
+## 🔍 MDP Formulation
 
-where ρx,t and ρy,t are small independent noises, sampled from N (0, 0.1) at each time-step t, and ∆t is set to 0.1 seconds. We are assuming here that the robot has a mass of 1 Kg. You can imagine the force noises as air resistance or random friction (although air resistance should scale up as a function of velocity).
+### ➤ Action Space
+Each action `a_t = (fx, fy)` represents force applied in the x and y directions:
+- `fx, fy ∈ [−1, 1]` Newton
 
-• The reward function is defined as: R(st) = 1 if ∥st − sg∥2 ≤ ε, and R(st) = 0 otherwise. sg = (xg, yg, 0, 0). It’s up to you to choose the values of the goal coordinates (xg,yg), but they should be fixed in advance. It’s also up to you to choose a reasonable value for the goal threshold ε.
+### ➤ State Space
+Each state `s_t = (x, y, ẋ, ẏ)` includes position and velocity in 2D.
 
-• Set the discount factor γ = 0.99.
+- Initial positions are uniformly sampled from the workspace.
+- Initial velocities are set to `0`.
 
-What you need to do:
-1. Leverage the Mujoco setup you had in HW 1 and modify it to simulate the MDP described above.
-2. Design a small actor neural network that predicts actions at ∼ πθ(st) as Gaussians, and a second small critic network that predicts values vw(st) of policy πθ.
-3. Implement the actor-critic algorithm explained in slide 40 of the lecture “Policy Gradients and Actor Critics”. It is up to you to define the length of the episodes (horizon) and the gradient step-sizes.
-4. Report the average reward per step as a function of the number of episodes that you used for training. This is called the learning curve.
-5. Submit the code and a small writeup on canvas. The writeup includes an explanation of what you did, and the results (the learning curve).
+### ➤ Transition Dynamics
+
+Given:
+- Time step `Δt = 0.1s`
+- Robot mass = 1 kg
+- Gaussian noise `ρx, ρy ∼ N(0, 0.1)`
+
+The dynamics evolve as:
+ẋ_{t+1} = ẋ_t + (fx_t − ρx_t) * Δt
+ẏ_{t+1} = ẏ_t + (fy_t − ρy_t) * Δt
+x_{t+1} = x_t + ẋ_t * Δt
+y_{t+1} = y_t + ẏ_t * Δt
+
+
+### ➤ Reward Function
+
+- `R(s_t) = 1` if `||s_t − s_g|| ≤ ε`
+- `R(s_t) = 0` otherwise  
+Where goal state `s_g = (x_g, y_g, 0, 0)` is fixed, and `ε` is a chosen threshold.
+
+### ➤ Discount Factor
+
+- `γ = 0.99`
+
+---
+
+## 🤖 Actor-Critic Algorithm
+
+The agent is trained using a basic actor-critic framework, based on the lecture "Policy Gradients and Actor Critics" (Slide 40).
+
+### Components:
+
+- **Actor Network:** Outputs Gaussian-distributed actions `a_t ~ π_θ(s_t)`
+- **Critic Network:** Predicts value estimates `V_w(s_t)` for the current policy
+- **Loss Functions:** 
+  - Critic: MSE between predicted and actual returns
+  - Actor: Policy gradient with advantage estimation
+
+---
+
+## ⚙️ Implementation Steps
+
+1. **MuJoCo Setup**  
+   - Reused environment setup from HW1  
+   - Modified XML and Python simulator to match MDP
+
+2. **Neural Networks**  
+   - Simple feedforward architectures for actor and critic  
+   - Implemented with PyTorch
+
+3. **Training Loop**  
+   - User-defined episode horizon  
+   - Batch training with gradient steps  
+   - Gaussian policy sampling
+
+4. **Evaluation**  
+   - Learning curve: average reward per step vs episodes
+
+---
+
+## 📈 Results
+
+The learning curve below shows the average reward per time step as training progresses. The agent gradually learns to reach the goal more consistently under stochastic dynamics.
