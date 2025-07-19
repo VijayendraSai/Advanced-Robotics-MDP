@@ -26,10 +26,10 @@ Given:
 - Gaussian noise `ρx, ρy ∼ N(0, 0.1)`
 
 The dynamics evolve as:
-ẋ_{t+1} = ẋ_t + (fx_t − ρx_t) * Δt
-ẏ_{t+1} = ẏ_t + (fy_t − ρy_t) * Δt
-x_{t+1} = x_t + ẋ_t * Δt
-y_{t+1} = y_t + ẏ_t * Δt
+- `ẋ_{t+1} = ẋ_t + (fx_t − ρx_t) * Δt`
+- `ẏ_{t+1} = ẏ_t + (fy_t − ρy_t) * Δt`
+- `x_{t+1} = x_t + ẋ_t * Δt`
+- `y_{t+1} = y_t + ẏ_t * Δt`
 
 
 ### ➤ Reward Function
